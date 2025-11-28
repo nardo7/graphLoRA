@@ -5,3 +5,7 @@ transformers==4.40.2
 datasets
 networkx
 matplotlib
+jupyterlab
+pandas
+Cython==3.0.10
+accelerate
