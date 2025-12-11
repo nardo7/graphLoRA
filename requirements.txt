@@ -9,3 +9,6 @@ jupyterlab
 pandas
 Cython==3.0.10
 accelerate
+evaluate
+scikit-learn
+peft==0.10.0
