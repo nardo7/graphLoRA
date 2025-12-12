@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 from transformers.models.graphormer.collating_graphormer import GraphormerDataCollator
 from transformers import GraphormerForGraphClassification
 from simple_trainer import train
-
+from lora import apply_lora_to_model
 
 if __name__ == "__main__":
     # There is only one split on the hub
@@ -20,6 +20,9 @@ if __name__ == "__main__":
             ignore_mismatched_sizes=True,
         )
     )
+
+    # Apply LoRA to specific modules
+    apply_lora_to_model(model, module_names=["q_proj", "k_proj"])
 
     train_ds = dataset["train"].with_format("numpy").take(1000)
     eval = dataset["validation"].with_format("numpy").take(100)
@@ -49,6 +52,6 @@ if __name__ == "__main__":
         device=torch.device("mps"),
         n_epochs=2,
         checkpoint_dir="./graph-classification/test/molhiv",
-        # resume_from_checkpoint=True,
+        resume_from_checkpoint=True,
         accumulate_gradient_steps=4,
     )
