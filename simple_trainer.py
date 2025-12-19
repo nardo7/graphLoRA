@@ -1,16 +1,24 @@
-from typing import Mapping, Union, cast, Optional
+from dataclasses import dataclass
+from typing import Mapping, Optional, Union, cast
+
+import numpy as np
 import torch
 import torch.nn as nn
-from tqdm import tqdm
-import numpy as np
-from transformers.modeling_outputs import SequenceClassifierOutput
 from sklearn.metrics import accuracy_score, roc_auc_score
-from checkpointing import save_checkpoint, load_checkpoint, find_last_checkpoint
+from tqdm import tqdm
+from transformers.modeling_outputs import SequenceClassifierOutput
+
+from checkpointing import find_last_checkpoint, load_checkpoint, save_checkpoint
 from optim import get_optimizer, get_scheduler
 
 
-class TrainingConfig:
-    pass
+@dataclass
+class FLAGConfig:
+    # default from the official graphormer code
+    use_FLAG: bool = False
+    m: int = 3
+    step_size: float = 0.01
+    epsilon: float = 0
 
 
 def train(
@@ -22,12 +30,16 @@ def train(
     checkpoint_dir: Optional[str] = None,
     resume_from_checkpoint: bool = False,
     accumulate_gradient_steps: int = 1,
+    flag_config: FLAGConfig = FLAGConfig(),
 ):
+    # Initialize optimizer and scheduler
     num_steps = n_epochs * len(dataloader)
     optimizer = get_optimizer(model)
     scheduler = get_scheduler(optimizer, num_steps)
     current_epoch = 0
     batch_size: int = cast(int, dataloader.batch_size)
+
+    # Load from checkpoint if desired (model, optimizer and scheduler states)
     if resume_from_checkpoint and checkpoint_dir is not None:
         path = find_last_checkpoint(checkpoint_dir)
         model, optimizer, scheduler, training_state = load_checkpoint(
@@ -48,6 +60,7 @@ def train(
         training_state.get("best_roc_auc", -1.0) if resume_from_checkpoint else -1.0
     )
 
+    # training loop
     for epoch in range(current_epoch, n_epochs):
         # Training phase
         model.train()
@@ -63,7 +76,7 @@ def train(
         # Create progress bar with simulated batch steps
         pbar = tqdm(
             total=total_gradient_steps,
-            desc=f"Epoch {epoch + 1}/{n_epochs} - Training",
+            desc=f"Epoch {epoch + 1}/{n_epochs} - Training Loss: {train_loss:.4f}",
             leave=False,
         )
 
@@ -71,19 +84,39 @@ def train(
             input = _prepare_input(data, device)
             input = cast(dict[str, torch.Tensor], input)
 
-            output: SequenceClassifierOutput = model(**input)
+            if flag_config.use_FLAG:
+                train_loss += _flag_inner_loop(
+                    model,
+                    input,
+                    flag_config.m,
+                    flag_config.step_size,
+                    flag_config.epsilon,
+                )
+            else:
+                output: SequenceClassifierOutput = model(**input)
 
-            loss = output.loss
-            # Normalize loss by accumulation steps
-            loss = loss / accumulate_gradient_steps
-            loss.backward()
+                loss = output.loss
 
-            train_loss += loss.detach().item() * accumulate_gradient_steps
+                # Normalize loss by accumulation steps
+                loss = loss / accumulate_gradient_steps
+
+                # apply regularization loss if applicable only once when the gradients will be applied instead of every step, which give the same loss
+                if can_apply_gradient_step(
+                    accumulated_steps + 1,
+                    accumulate_gradient_steps,
+                    step,
+                    len(dataloader),
+                ) and hasattr(model, "regularization_loss"):
+                    loss += model.config.beta_reg * model.regularization_loss()
+
+                loss.backward()
+
+                train_loss += loss.detach().item() * accumulate_gradient_steps
             accumulated_steps += 1
 
             # Only update weights after accumulating enough gradients
-            if accumulated_steps >= accumulate_gradient_steps or (step + 1) == len(
-                dataloader
+            if can_apply_gradient_step(
+                accumulated_steps, accumulate_gradient_steps, step, len(dataloader)
             ):
                 optimizer.step()
                 optimizer.zero_grad()
@@ -119,6 +152,15 @@ def train(
                         checkpoint_dir=checkpoint_dir,
                     )
                     print(f"✓ Checkpoint saved! New best ROC-AUC: {best_roc_auc:.4f}")
+
+
+def can_apply_gradient_step(
+    accumulated_steps: int,
+    step_size: int,
+    step: int,
+    total_steps: int,
+):
+    return accumulated_steps >= step_size or (step + 1) == total_steps
 
 
 def evaluate(
@@ -181,6 +223,37 @@ def evaluate(
             metrics["roc_auc"] = roc_auc_score(all_labels, all_predictions)
 
     return metrics
+
+
+def _flag_inner_loop(
+    model: nn.Module,
+    batch: dict[str, torch.Tensor],
+    m: int,
+    step_size: float,
+    epsilon: float,
+    loss_fn: nn.Module = nn.CrossEntropyLoss(),
+) -> float:
+    # return batch
+    train_loss = 0.0
+    x = batch["input_nodes"]
+    perturb = (
+        nn.init.uniform_(torch.FloatTensor(*x.shape), -step_size, step_size)
+        .to(x.device)
+        .requires_grad_(True)
+    )
+    for _ in range(m):
+        x = batch["input_nodes"]
+        x = x + perturb
+        batch["input_nodes"] = x
+
+        out = model(**batch)
+        loss = out.loss / m
+        loss.backward()  # accumulates model grads + perturb.grad
+        with torch.no_grad():
+            perturb += step_size * perturb.grad.sign()
+        perturb.grad.zero_()  # ONLY reset perturb grad
+        train_loss += loss.detach().item()
+    return train_loss
 
 
 def _prepare_input(
