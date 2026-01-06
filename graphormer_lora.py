@@ -18,6 +18,7 @@ if __name__ == "__main__":
     dataset = load_dataset("OGB/ogbg-molhiv", cache_dir="./data")
     seed = 42
     dataset = dataset.shuffle(seed=seed)
+    load_from_checkpoint = False
 
     model = GraphormerForGraphClassification.from_pretrained(
         "clefourrier/pcqm4mv2_graphormer_base",
@@ -25,8 +26,12 @@ if __name__ == "__main__":
         ignore_mismatched_sizes=True,
     )
 
-    lora_config = LoraConfig(r=4, target_modules=["q_proj", "k_proj"])
-    model.add_adapter(adapter_config=lora_config)
+    if load_from_checkpoint:
+        checkpoint_path = "graph-classification/lora/molhiv/checkpoint-1028"
+        model.load_adapter(checkpoint_path)
+    else:
+        lora_config = LoraConfig(r=8, target_modules=["q_proj", "k_proj"])
+        model.add_adapter(adapter_config=lora_config)
 
     training_args = TrainingArguments(
         "graph-classification/lora/molhiv",
@@ -34,9 +39,9 @@ if __name__ == "__main__":
         per_device_train_batch_size=16,
         per_device_eval_batch_size=16,
         auto_find_batch_size=True,  # batch size can be changed automatically to prevent OOMs
-        gradient_accumulation_steps=4,  # simulating batch size of 64
+        gradient_accumulation_steps=8,  # simulating batch size of 128
         dataloader_num_workers=8,  # 1,
-        num_train_epochs=4,
+        num_train_epochs=8,
         evaluation_strategy="epoch",
         logging_strategy="epoch",
         save_strategy="epoch",  # Save model checkpoint every epoch
@@ -70,4 +75,4 @@ if __name__ == "__main__":
         data_collator=GraphormerDataCollator(on_the_fly_processing=True),
         compute_metrics=compute_metrics,
     )
-    train_results = trainer.train(resume_from_checkpoint=True)
+    train_results = trainer.train()

@@ -1,6 +1,7 @@
+import math
+
 import torch
 from torch import nn
-import math
 
 
 class LoRALayer(nn.Module):
@@ -62,7 +63,7 @@ def apply_lora_to_model(
     """
     # Freeze all model parameters first
     model.requires_grad_(False)
-    
+
     applied_modules = []
     for name, module in model.named_modules():
         # looking for the specified module names
@@ -77,3 +78,6 @@ def apply_lora_to_model(
             setattr(parent_module, name_parts[-1], lora_layer)
 
     print(f"Applied LoRA to modules: {applied_modules}")
+    print(
+        f"Total trainable parameters after LoRA: {sum(p.numel() for p in model.parameters() if p.requires_grad)} from a total of {sum(p.numel() for p in model.parameters())} parameters."
+    )

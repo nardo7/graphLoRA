@@ -1,10 +1,10 @@
-import math
-import os
 import glob
-import torch
-from torch import nn
+import os
 from typing import Optional
+
+import torch
 from safetensors.torch import load_file
+from torch import nn
 
 
 def save_checkpoint(
@@ -32,11 +32,17 @@ def save_checkpoint(
     # Save scheduler state
     torch.save(scheduler.state_dict(), os.path.join(checkpoint_path, "scheduler.pt"))
 
+    # Calculate trainable parameters
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+
     # Save training state (epoch, metrics, and best metric)
     training_state = {
         "epoch": epoch + 1,
         "metrics": metrics,
         "best_roc_auc": metrics.get("roc_auc", 0.0),
+        "trainable_params": trainable_params,
+        "total_params": total_params,
         # "optimizer_steps": optimizer.state_dict()["state"].get(0, {}).get("step", 0)
         # if optimizer.state_dict()["state"]
         # else 0,
@@ -44,6 +50,9 @@ def save_checkpoint(
     torch.save(training_state, os.path.join(checkpoint_path, "trainer_state.pt"))
 
     print(f"Checkpoint saved to {checkpoint_path}")
+    print(
+        f"Trainable parameters: {trainable_params:,} / {total_params:,} ({100 * trainable_params / total_params:.2f}%)"
+    )
 
 
 def load_checkpoint(
@@ -110,10 +119,19 @@ def load_checkpoint(
     training_state = None
     if os.path.exists(trainer_state_path):
         training_state = torch.load(trainer_state_path, map_location=device)
+        trainable_params = training_state.get("trainable_params", "N/A")
+        total_params = training_state.get("total_params", "N/A")
+
         print(
             f"Training state loaded: Epoch {training_state['epoch']}, "
             f"Best ROC-AUC: {training_state.get('best_roc_auc', 'N/A')}"
         )
+
+        if trainable_params != "N/A" and total_params != "N/A":
+            print(
+                f"Trainable parameters: {trainable_params:,} / {total_params:,} "
+                f"({100 * trainable_params / total_params:.2f}%)"
+            )
 
     return model, optimizer, scheduler, training_state
 
