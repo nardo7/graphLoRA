@@ -14,6 +14,10 @@ The [Graphormer](https://graphormer.readthedocs.io/en/latest/) is a foundational
 
 The main goal of this project is to evaluate the performance of LoRA when fine-tuning the Graphormer model in graph classification tasks. The experiments were conducted on the [MOLHIV](https://ogb.stanford.edu/docs/graphprop/#molhiv) dataset from the [Open Graph Benchmark (OGB)](https://ogb.stanford.edu/). The performance of LoRA was compared to full fine-tuning in terms of accuracy, ROC-AUC, training time.
 
+## Results
+
+Please check the results notebook [results.ipynb](results.ipynb) for more details about the results obtained in the experiments.
+
 ## Project Structure
 
 Please check the following structure of the project. Here you can concretely see what I did and where the experiments are located and the results, so you can check my work:
@@ -79,10 +83,6 @@ The hyperparameters used for the experiments were the default ones given by the 
 ### Setup
 
 All the experiments were run in a M1 MacBook Pro with 32GB of RAM (CPU & GPU).
-
-## Results
-
-Please check the results notebook [results.ipynb](results.ipynb) for more details about the results obtained in the experiments.
 
 ## Acknowledgements
 
