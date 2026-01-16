@@ -30,14 +30,16 @@ def train(
     checkpoint_dir: Optional[str] = None,
     resume_from_checkpoint: bool = False,
     accumulate_gradient_steps: int = 1,
+    learning_rate: float = 4e-4,
+    max_grad_norm: float = 1.0,
+    num_warmup_steps: Optional[int] = None,
     flag_config: FLAGConfig = FLAGConfig(),
 ):
     # Initialize optimizer and scheduler
     num_steps = n_epochs * len(dataloader)
-    optimizer = get_optimizer(model)
-    scheduler = get_scheduler(optimizer, num_steps)
+    optimizer = get_optimizer(model, learning_rate=learning_rate)
+    scheduler = get_scheduler(optimizer, num_steps, num_warmup_steps=num_warmup_steps)
     current_epoch = 0
-    batch_size: int = cast(int, dataloader.batch_size)
 
     # Load from checkpoint if desired (model, optimizer and scheduler states)
     if resume_from_checkpoint and checkpoint_dir is not None:
@@ -67,6 +69,8 @@ def train(
         train_loss = 0.0
         train_steps = 0
         accumulated_steps = 0
+        total_grad_norm = 0.0
+        grad_norm_count = 0
 
         # Calculate total steps based on simulated batch size
         total_gradient_steps = len(dataloader) // (accumulate_gradient_steps) + (
@@ -97,6 +101,15 @@ def train(
 
                 loss = output.loss
 
+                # Check for NaN loss before proceeding
+                if torch.isnan(loss) or torch.isinf(loss):
+                    print(
+                        f"\nWARNING: NaN/Inf loss detected at epoch {epoch + 1}, step {step}"
+                    )
+                    print(f"Current LR: {scheduler.get_last_lr()[0]:.2e}")
+                    # Skip this batch
+                    continue
+
                 # Normalize loss by accumulation steps
                 loss = loss / accumulate_gradient_steps
 
@@ -118,6 +131,27 @@ def train(
             if can_apply_gradient_step(
                 accumulated_steps, accumulate_gradient_steps, step, len(dataloader)
             ):
+                # Compute gradient norm before clipping
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    [p for p in model.parameters() if p.requires_grad],
+                    max_norm=max_grad_norm,
+                )
+
+                # Check for NaN gradients
+                if torch.isnan(grad_norm) or torch.isinf(grad_norm):
+                    print(
+                        f"\nWARNING: NaN/Inf gradient detected at epoch {epoch + 1}, step {step}"
+                    )
+                    print(
+                        f"Gradient norm: {grad_norm.item()}, Current LR: {scheduler.get_last_lr()[0]:.2e}"
+                    )
+                    optimizer.zero_grad()
+                    accumulated_steps = 0
+                    continue
+
+                total_grad_norm += grad_norm.item()
+                grad_norm_count += 1
+
                 optimizer.step()
                 optimizer.zero_grad()
                 scheduler.step()
@@ -125,12 +159,23 @@ def train(
                 accumulated_steps = 0
                 # Update progress bar only on actual gradient steps
                 pbar.update(1)
+                pbar.set_description(
+                    f"Epoch {epoch + 1}/{n_epochs} - Training Loss: {train_loss / train_steps:.4f} - Grad Norm: {grad_norm:.4f} - LR: {scheduler.get_last_lr()[0]:.2e}"
+                )
 
         pbar.close()
 
         avg_train_loss = train_loss / train_steps
+        avg_grad_norm = (
+            total_grad_norm / grad_norm_count if grad_norm_count > 0 else 0.0
+        )
+        current_lr = scheduler.get_last_lr()[0]
+
         print(
-            f"Epoch {epoch + 1}/{n_epochs} - Average Training Loss: {avg_train_loss:.4f}"
+            f"Epoch {epoch + 1}/{n_epochs} - "
+            f"Train Loss: {avg_train_loss:.4f}, "
+            f"Grad Norm: {avg_grad_norm:.4f}, "
+            f"LR: {current_lr:.2e}"
         )
 
         # Evaluation phase

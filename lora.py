@@ -62,6 +62,7 @@ def apply_lora_to_model(
         module_names: List of module names (as strings) to apply LoRA to.
     """
     # Freeze all model parameters first
+    print("Applying LoRA to the model...")
     model.requires_grad_(False)
 
     applied_modules = []
@@ -76,8 +77,13 @@ def apply_lora_to_model(
             for part in name_parts[:-1]:
                 parent_module = getattr(parent_module, part)
             setattr(parent_module, name_parts[-1], lora_layer)
+        if name == "classifier":
+            module.requires_grad_(
+                True
+            )  # Always train the final classifier layer, otherwise performance degrades significantly
+            applied_modules.append(name)
 
     print(f"Applied LoRA to modules: {applied_modules}")
     print(
-        f"Total trainable parameters after LoRA: {sum(p.numel() for p in model.parameters() if p.requires_grad)} from a total of {sum(p.numel() for p in model.parameters())} parameters."
+        f"Total trainable parameters after LoRA: {sum(p.numel() for p in model.parameters(recurse=True) if p.requires_grad)} from a total of {sum(p.numel() for p in model.parameters(recurse=True))} parameters."
     )

@@ -71,8 +71,9 @@ def main():
     runs = {
         "HF Full": "./graph-classification/full/molhiv",
         "HF LoRA": "./graph-classification/lora/molhiv",
-        "Own Code Full": "./graph-classification/own_code/full/molhiv",
+        "Own Code Full": "./graph-classification/own_code/full_b_64/molhiv",
         "Own Code Regularized": "./graph-classification/own_code/regularized/molhiv",
+        "Own Code LoRA": "./graph-classification/own_code/lora/molhiv",
     }
 
     # Collect best ROC-AUC for each run

@@ -57,7 +57,7 @@ if __name__ == "__main__":
         model=model,
         device=torch.device("mps"),
         n_epochs=8,
-        checkpoint_dir="./graph-classification/own_code/flag/molhiv",
+        checkpoint_dir="./graph-classification/own_code/regularized/molhiv",
         # resume_from_checkpoint=True,
         accumulate_gradient_steps=4,
     )

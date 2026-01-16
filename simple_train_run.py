@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader
 from transformers import GraphormerForGraphClassification
 from transformers.models.graphormer.collating_graphormer import GraphormerDataCollator
 
+from lora import apply_lora_to_model
 from simple_trainer import train
 
 if __name__ == "__main__":
@@ -11,6 +12,10 @@ if __name__ == "__main__":
     dataset = load_dataset("OGB/ogbg-molhiv", cache_dir="./data")
     seed = 42
     dataset = dataset.shuffle(seed=seed)
+    apply_lora = False
+    checkpoint_dir = "./graph-classification/own_code/full_b_64/molhiv"
+    resume_from_checkpoint = False
+    lr = 2e-4  # use 2e-4 for full fine-tuning, 2e-3 for LoRA
 
     model: GraphormerForGraphClassification = (
         GraphormerForGraphClassification.from_pretrained(
@@ -20,8 +25,13 @@ if __name__ == "__main__":
         )
     )
 
-    # Apply LoRA to specific modules
-    # apply_lora_to_model(model, module_names=["q_proj", "k_proj"], r=16)
+    if apply_lora:
+        # Apply LoRA to specific modules
+        apply_lora_to_model(
+            model,
+            module_names=["q_proj", "k_proj", "v_proj", "lm_head_transform_weight"],
+            r=16,
+        )
 
     train_ds = dataset["train"].with_format("numpy")
     eval = dataset["validation"].with_format("numpy")
@@ -50,7 +60,10 @@ if __name__ == "__main__":
         model=model,
         device=torch.device("mps"),
         n_epochs=8,
-        checkpoint_dir="./graph-classification/own_code/full_b_128/molhiv",
-        # resume_from_checkpoint=True,
-        accumulate_gradient_steps=8,  # simulating batch size of 128
+        checkpoint_dir=checkpoint_dir,
+        resume_from_checkpoint=resume_from_checkpoint,
+        accumulate_gradient_steps=4,  # simulating batch size of 64
+        learning_rate=lr,
+        max_grad_norm=10.0,  # Higher threshold for 2e-4 LR
+        num_warmup_steps=None,  # Defaults to 10% of total steps
     )
